@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🗽 NY Facility Dashboard</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: #f5f4f0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 14px;
+  color: #1a1a18;
+  padding: 16px;
+  max-width: 860px;
+  margin: 0 auto;
+}
+
+.header {
+  background: white;
+  border: 0.5px solid #e0ddd5;
+  border-radius: 12px;
+  padding: 12px 16px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.header-title { font-size: 16px; font-weight: 500; }
+.header-sub { font-size: 12px; color: #888780; margin-top: 3px; }
+.header-right { text-align: right; }
+.updated-at { font-size: 12px; color: #888780; margin-bottom: 4px; }
+.refresh-btn {
+  padding: 5px 12px;
+  font-size: 12px;
+  border: 0.5px solid #d3d1c7;
+  border-radius: 6px;
+  background: white;
+  cursor: pointer;
+  color: #444441;
+}
+.refresh-btn:hover { background: #f1efe8; }
+
+.section {
+  background: white;
+  border: 0.5px solid #e0ddd5;
+  border-radius: 12px;
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+.section-title {
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  border-bottom: 0.5px solid #f0ede5;
+}
+
+table { width: 100%; border-collapse: collapse; }
+th {
+  padding: 7px 12px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #888780;
+  text-align: left;
+  border-bottom: 0.5px solid #f0ede5;
+}
+td {
+  padding: 7px 12px;
+  font-size: 13px;
+  border-bottom: 0.5px solid #f7f5f2;
+  vertical-align: middle;
+}
+tr:last-child td { border-bottom: none; }
+
+.val-big { font-weight: 600; font-size: 15px; }
+.muted { color: #888780; }
+.bar { font-size: 11px; letter-spacing: -1px; }
+.pct { font-size: 11px; color: #666460; margin-left: 3px; }
+
+.good { color: #3b6d11; }
+.bad  { color: #a32d2d; }
+.flat { color: #888780; }
+
+.medal { font-size: 15px; }
+.lb-name { font-weight: 500; }
+.lb-count { font-weight: 600; font-size: 15px; }
+
+.callout {
+  margin: 0 12px 10px;
+  padding: 7px 10px;
+  background: #f8f7f4;
+  border-left: 3px solid #d3d1c7;
+  font-size: 11px;
+  color: #888780;
+  border-radius: 0 4px 4px 0;
+}
+
+.loading {
+  padding: 32px;
+  text-align: center;
+  color: #888780;
+  font-size: 13px;
+}
+.error-box {
+  margin: 12px;
+  padding: 12px 14px;
+  background: #fcebeb;
+  border-radius: 8px;
+  color: #a32d2d;
+  font-size: 13px;
+}
+
+.dots span { display: inline-block; animation: blink 1.2s infinite; }
+.dots span:nth-child(2) { animation-delay: .2s; }
+.dots span:nth-child(3) { animation-delay: .4s; }
+@keyframes blink { 0%,80%,100%{opacity:.2} 40%{opacity:1} }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <div class="header-title">🗽 New York Facility Dashboard</div>
+    <div class="header-sub" id="header-sub">Live · refreshes on page load</div>
+  </div>
+  <div class="header-right">
+    <div class="updated-at" id="updated-at">—</div>
+    <button class="refresh-btn" onclick="init()">↺ Refresh</button>
+  </div>
+</div>
+
+<div id="app">
+  <div class="loading"><span class="dots"><span>●</span><span>●</span><span>●</span></span></div>
+</div>
+
+<script>
+// ── CONFIG — fill in METABASE_PASS before pushing ──────────────────
+const METABASE_URL  = 'https://metabase.upway.app';
+const METABASE_USER = 'jareth@upway.shop';
+const METABASE_PASS = 'YOUR_METABASE_PASSWORD_HERE';
+const DB = 6;
+// ──────────────────────────────────────────────────────────────────
+
+const HOLIDAYS = new Set([
+  '2026-06-19','2026-07-03','2026-09-07',
+  '2026-11-11','2026-11-26','2026-12-25'
+]);
+
+// ── QUERIES ────────────────────────────────────────────────────────
+
+const SQL_A = `
+WITH ny_bikes AS (
+  SELECT bk.id AS bike_id FROM \`upway-331113.prod_public.Bike\` bk
+  JOIN \`upway-331113.prod_public.PhysicalBike\` pb ON bk.physicalBikeId = pb.id
+  WHERE pb.warehouse='newyork'
+),
+days AS (
+  SELECT day FROM UNNEST(GENERATE_DATE_ARRAY(
+    DATE_SUB(CURRENT_DATE('America/New_York'), INTERVAL 13 DAY),
+    CURRENT_DATE('America/New_York'))) AS day
+),
+ev AS (
+  SELECT u.itemId, u.date, u.name,
+    JSON_EXTRACT_SCALAR(u.details, '$.step') AS step,
+    JSON_EXTRACT_SCALAR(u.details, '$.physicalBike.location') AS loc
+  FROM \`upway-331113.prod_public.Update\` u
+  JOIN ny_bikes nb ON u.itemId = nb.bike_id
+  WHERE u.itemType='bike'
+    AND u.date >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 60 DAY)
+),
+checkins AS (
+  SELECT DATE(c.endedAt, 'America/New_York') d, COUNT(*) n
+  FROM \`upway-331113.prod_public.BikeCheckinSession\` c
+  JOIN ny_bikes nb ON CAST(c.bikeId AS STRING) = nb.bike_id
+  WHERE c.endedAt >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 15 DAY)
+  GROUP BY 1
+),
+daily_ev AS (
+  SELECT DATE(date, 'America/New_York') d,
+    COUNTIF(name='imagesUploaded') photos,
+    COUNTIF(name='toPrepareForUpload') upload_list,
+    COUNTIF(name='repairSessionFinished') repairs,
+    COUNT(DISTINCT IF(name='checkoutStepSucceeded' AND step='packaging', itemId, NULL)) shipments
+  FROM ev
+  WHERE date >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 15 DAY)
+  GROUP BY 1
+),
+seq AS (
+  SELECT itemId, date, loc,
+    LAG(loc) OVER (PARTITION BY itemId ORDER BY date) prev_loc
+  FROM ev WHERE loc IS NOT NULL
+),
+rz AS (
+  SELECT DATE(date, 'America/New_York') d,
+    COUNTIF(loc='Redzone' AND (prev_loc IS NULL OR prev_loc!='Redzone')) rz_in,
+    COUNTIF(prev_loc='Redzone' AND loc!='Redzone') rz_out
+  FROM seq
+  WHERE date >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 15 DAY)
+  GROUP BY 1
+)
+SELECT FORMAT_DATE('%Y-%m-%d', days.day) AS day,
+  COALESCE(checkins.n,0) checkins,
+  COALESCE(daily_ev.photos,0) photos,
+  COALESCE(daily_ev.upload_list,0) upload_list,
+  COALESCE(daily_ev.repairs,0) repairs,
+  COALESCE(daily_ev.shipments,0) shipments,
+  COALESCE(rz.rz_in,0) redzone_in,
+  COALESCE(rz.rz_out,0) redzone_out
+FROM days
+LEFT JOIN checkins ON days.day = checkins.d
+LEFT JOIN daily_ev ON days.day = daily_ev.d
+LEFT JOIN rz ON days.day = rz.d
+ORDER BY days.day`;
+
+const SQL_B = `
+SELECT u.initiator, COUNT(*) sessions
+FROM \`upway-331113.prod_public.Update\` u
+JOIN \`upway-331113.prod_public.Bike\` bk ON u.itemId = bk.id
+JOIN \`upway-331113.prod_public.PhysicalBike\` pb ON bk.physicalBikeId = pb.id
+WHERE u.itemType='bike' AND u.name='repairSessionFinished'
+  AND pb.warehouse='newyork'
+  AND u.initiator IS NOT NULL
+  AND u.date >= TIMESTAMP(DATE_TRUNC(CURRENT_DATE('America/New_York'), WEEK(MONDAY)), 'America/New_York')
+GROUP BY 1 ORDER BY sessions DESC LIMIT 8`;
+
+const SQL_C = `
+WITH ny_bikes AS (
+  SELECT bk.id AS bike_id FROM \`upway-331113.prod_public.Bike\` bk
+  JOIN \`upway-331113.prod_public.PhysicalBike\` pb ON bk.physicalBikeId = pb.id
+  WHERE pb.warehouse='newyork'
+),
+params AS (
+  SELECT CURRENT_DATE('America/New_York') AS today,
+    DATE_TRUNC(CURRENT_DATE('America/New_York'), MONTH) AS m_start,
+    LAST_DAY(CURRENT_DATE('America/New_York')) AS m_end
+),
+tgt AS (
+  SELECT p.*,
+    CASE EXTRACT(MONTH FROM p.today)
+      WHEN 6 THEN 520.5 WHEN 7 THEN 580 WHEN 8 THEN 637.5
+      WHEN 9 THEN 637.5 WHEN 10 THEN 580 WHEN 11 THEN 524
+      WHEN 12 THEN 439 ELSE 520 END AS t_flow,
+    CASE EXTRACT(MONTH FROM p.today)
+      WHEN 6 THEN 525.5 WHEN 7 THEN 549 WHEN 8 THEN 597
+      WHEN 9 THEN 501.5 WHEN 10 THEN 477.5 WHEN 11 THEN 525.5
+      WHEN 12 THEN 477.5 ELSE 520 END AS t_ship
+  FROM params p
+),
+dleft AS (
+  SELECT COUNT(*) AS n FROM tgt t,
+    UNNEST(GENERATE_DATE_ARRAY(t.today, t.m_end)) d
+  WHERE EXTRACT(DAYOFWEEK FROM d) NOT IN (1, 7)
+    AND d NOT IN ('2026-06-19','2026-07-03','2026-09-07','2026-11-11','2026-11-26','2026-12-25')
+),
+dtotal AS (
+  SELECT COUNT(*) AS n FROM tgt t,
+    UNNEST(GENERATE_DATE_ARRAY(t.m_start, t.m_end)) d
+  WHERE EXTRACT(DAYOFWEEK FROM d) NOT IN (1, 7)
+    AND d NOT IN ('2026-06-19','2026-07-03','2026-09-07','2026-11-11','2026-11-26','2026-12-25')
+),
+chk AS (
+  SELECT
+    COUNTIF(DATE(c.endedAt,'America/New_York')=t.today) today_n,
+    COUNTIF(DATE(c.endedAt,'America/New_York')<t.today) mtd
+  FROM \`upway-331113.prod_public.BikeCheckinSession\` c
+  JOIN ny_bikes nb ON CAST(c.bikeId AS STRING)=nb.bike_id
+  CROSS JOIN tgt t
+  WHERE DATE(c.endedAt,'America/New_York') >= t.m_start
+),
+ev AS (
+  SELECT u.itemId, u.name,
+    JSON_EXTRACT_SCALAR(u.details,'$.step') AS step,
+    DATE(u.date,'America/New_York') AS d
+  FROM \`upway-331113.prod_public.Update\` u
+  JOIN ny_bikes nb ON u.itemId=nb.bike_id
+  CROSS JOIN tgt t
+  WHERE u.itemType='bike' AND DATE(u.date,'America/New_York') >= t.m_start
+),
+upl AS (
+  SELECT COUNTIF(d=t.today) today_n, COUNTIF(d<t.today) mtd
+  FROM ev CROSS JOIN tgt t WHERE name='toPrepareForUpload'
+),
+rep AS (
+  SELECT COUNTIF(d=t.today) today_n, COUNTIF(d<t.today) mtd
+  FROM ev CROSS JOIN tgt t WHERE name='repairSessionFinished'
+),
+shp_days AS (
+  SELECT d, COUNT(DISTINCT itemId) n FROM ev
+  WHERE name='checkoutStepSucceeded' AND step='packaging' GROUP BY d
+),
+shp AS (
+  SELECT
+    COALESCE(SUM(IF(d=t.today,n,0)),0) today_n,
+    COALESCE(SUM(IF(d<t.today,n,0)),0) mtd
+  FROM shp_days CROSS JOIN tgt t
+)
+SELECT
+  GREATEST(25, LEAST(
+    ROUND(GREATEST(tgt.t_flow-chk.mtd,0)/GREATEST(dleft.n,1)),
+    ROUND(tgt.t_flow/dtotal.n * 1.2)
+  )) AS checkins_goal,
+  ROUND(100*chk.today_n/GREATEST(GREATEST(25,LEAST(
+    ROUND(GREATEST(tgt.t_flow-chk.mtd,0)/GREATEST(dleft.n,1)),
+    ROUND(tgt.t_flow/dtotal.n*1.2))),1)) AS checkins_pct,
+  GREATEST(25, LEAST(
+    ROUND(GREATEST(tgt.t_flow-upl.mtd,0)/GREATEST(dleft.n,1)),
+    ROUND(tgt.t_flow/dtotal.n * 1.2)
+  )) AS uploads_goal,
+  ROUND(100*upl.today_n/GREATEST(GREATEST(25,LEAST(
+    ROUND(GREATEST(tgt.t_flow-upl.mtd,0)/GREATEST(dleft.n,1)),
+    ROUND(tgt.t_flow/dtotal.n*1.2))),1)) AS uploads_pct,
+  GREATEST(25, LEAST(
+    ROUND(GREATEST(tgt.t_flow-rep.mtd,0)/GREATEST(dleft.n,1)),
+    ROUND(tgt.t_flow/dtotal.n * 1.2)
+  )) AS repairs_goal,
+  ROUND(100*rep.today_n/GREATEST(GREATEST(25,LEAST(
+    ROUND(GREATEST(tgt.t_flow-rep.mtd,0)/GREATEST(dleft.n,1)),
+    ROUND(tgt.t_flow/dtotal.n*1.2))),1)) AS repairs_pct,
+  GREATEST(25, LEAST(
+    ROUND(GREATEST(tgt.t_ship-shp.mtd,0)/GREATEST(dleft.n,1)),
+    ROUND(tgt.t_ship/dtotal.n * 1.2)
+  )) AS shipments_goal,
+  ROUND(100*shp.today_n/GREATEST(GREATEST(25,LEAST(
+    ROUND(GREATEST(tgt.t_ship-shp.mtd,0)/GREATEST(dleft.n,1)),
+    ROUND(tgt.t_ship/dtotal.n*1.2))),1)) AS shipments_pct
+FROM chk, upl, rep, shp, tgt, dleft, dtotal`;
+
+// ── HELPERS ────────────────────────────────────────────────────────
+
+function todayET() {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date());
+}
+
+function addDays(dateStr, n) {
+  const d = new Date(dateStr + 'T12:00:00');
+  d.setDate(d.getDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+function mondayOf(dateStr) {
+  const d = new Date(dateStr + 'T12:00:00');
+  const dow = d.getDay(); // 0=Sun
+  const diff = dow === 0 ? -6 : 1 - dow;
+  return addDays(dateStr, diff);
+}
+
+function weekPace(mondayStr) {
+  // Mon–Sat of this week, 21/day, minus holidays
+  let count = 0;
+  for (let i = 0; i < 6; i++) {
+    const d = addDays(mondayStr, i);
+    if (!HOLIDAYS.has(d)) count++;
+  }
+  return count * 21;
+}
+
+function bar(pct) {
+  const n = Math.min(Math.round(pct / 10), 10);
+  return '🟪'.repeat(n) + '⬜'.repeat(10 - n);
+}
+
+function trendCell(now, prev, invertGood = false) {
+  if (!prev) return '<span class="flat">■ —</span>';
+  const pct = Math.round((now - prev) / prev * 100);
+  if (pct === 0) return '<span class="flat">■ 0%</span>';
+  const up = pct > 0;
+  const good = invertGood ? !up : up;
+  const cls = good ? 'good' : 'bad';
+  const icon = good ? '🟢' : '🔴';
+  const arrow = up ? '▲' : '▼';
+  const sign = up ? '+' : '';
+  return `<span class="${cls}">${icon} ${arrow} ${sign}${pct}%</span>`;
+}
+
+function friendlyName(email) {
+  return (email || '').split('@')[0].split('.')
+    .map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(' ');
+}
+
+function sum(rows, key) {
+  return rows.reduce((a, r) => a + (Number(r[key]) || 0), 0);
+}
+
+// ── METABASE API ───────────────────────────────────────────────────
+
+async function authenticate() {
+  const r = await fetch(`${METABASE_URL}/api/session`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: METABASE_USER, password: METABASE_PASS })
+  });
+  if (!r.ok) throw new Error(`Auth ${r.status}: check credentials`);
+  return (await r.json()).id;
+}
+
+async function query(sql, token) {
+  const r = await fetch(`${METABASE_URL}/api/dataset`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Metabase-Session': token
+    },
+    body: JSON.stringify({ database: DB, native: { query: sql }, type: 'native' })
+  });
+  if (!r.ok) throw new Error(`Query ${r.status}`);
+  const d = await r.json();
+  if (d.error) throw new Error(d.error);
+  const cols = d.data.cols.map(c => c.name);
+  return d.data.rows.map(row => Object.fromEntries(cols.map((c, i) => [c, row[i]])));
+}
+
+// ── RENDER ─────────────────────────────────────────────────────────
+
+function render(rowsA, rowsB, goals) {
+  const today = todayET();
+  const yesterday = addDays(today, -1);
+  const monday = mondayOf(today);
+  const lastMonday = addDays(monday, -7);
+  const lastSunday = addDays(monday, -1);
+  const priorWeekDay = addDays(yesterday, -7);
+  const pace = weekPace(monday);
+
+  // Index by date
+  const byDate = Object.fromEntries(rowsA.map(r => [r.day, r]));
+
+  const todayRow = byDate[today]     || {};
+  const yestRow  = byDate[yesterday] || {};
+  const priorRow = byDate[priorWeekDay] || {};
+
+  const weekRows = rowsA.filter(r => r.day >= monday && r.day <= today);
+  const lwRows   = rowsA.filter(r => r.day >= lastMonday && r.day <= lastSunday);
+
+  const metrics = [
+    { label: '✅ Check-ins',         key: 'checkins',   goal: goals.checkins_goal,  pct: goals.checkins_pct,  hasGoal: true },
+    { label: '📸 Photos taken',      key: 'photos',                                                            hasGoal: false },
+    { label: '⬆️ Upload list',       key: 'upload_list', goal: goals.uploads_goal,  pct: goals.uploads_pct,   hasGoal: true },
+    { label: '🔧 Repairs',           key: 'repairs',    goal: goals.repairs_goal,   pct: goals.repairs_pct,   hasGoal: true },
+    { label: '📦 Shipments',         key: 'shipments',  goal: goals.shipments_goal, pct: goals.shipments_pct, hasGoal: true },
+    { label: '🔴 Into Red Zone',     key: 'redzone_in',                                                        hasGoal: false },
+    { label: '🟢 Out of Red Zone',   key: 'redzone_out',                                                       hasGoal: false },
+  ];
+
+  // TODAY section
+  const todayTbody = metrics.map(m => {
+    const val = Number(todayRow[m.key] || 0);
+    if (m.hasGoal) {
+      const p = Number(m.pct) || 0;
+      return `<tr>
+        <td>${m.label}</td>
+        <td class="val-big">${val}</td>
+        <td class="muted">${m.goal}</td>
+        <td class="bar">${bar(p)}<span class="pct">${p}%</span></td>
+      </tr>`;
+    }
+    return `<tr>
+      <td>${m.label}</td>
+      <td class="val-big">${val}</td>
+      <td class="muted">—</td>
+      <td class="muted">—</td>
+    </tr>`;
+  }).join('');
+
+  // WEEK section
+  const weekTbody = metrics.map(m => {
+    const wVal = sum(weekRows, m.key);
+    const lwVal = sum(lwRows, m.key);
+    if (m.hasGoal) {
+      const p = pace > 0 ? Math.round(wVal / pace * 100) : 0;
+      return `<tr>
+        <td>${m.label}</td>
+        <td class="val-big">${wVal}</td>
+        <td class="muted">${pace}</td>
+        <td class="bar">${bar(p)}<span class="pct">${p}%</span></td>
+        <td class="muted">${lwVal}</td>
+      </tr>`;
+    }
+    return `<tr>
+      <td>${m.label}</td>
+      <td class="val-big">${wVal}</td>
+      <td class="muted">—</td>
+      <td class="muted">—</td>
+      <td class="muted">${lwVal}</td>
+    </tr>`;
+  }).join('');
+
+  // YESTERDAY section
+  const DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const yestDow = DAYS[new Date(yesterday + 'T12:00:00').getDay()];
+  const priorDow = DAYS[new Date(priorWeekDay + 'T12:00:00').getDay()];
+  const yestTbody = metrics.map(m => {
+    const yVal = Number(yestRow[m.key] || 0);
+    const pVal = Number(priorRow[m.key] || 0);
+    const invert = m.key === 'redzone_in';
+    return `<tr>
+      <td>${m.label}</td>
+      <td>${yVal}</td>
+      <td>${pVal}</td>
+      <td>${trendCell(yVal, pVal, invert)}</td>
+    </tr>`;
+  }).join('');
+
+  // LEADERBOARD section
+  const medals = ['🥇','🥈','🥉'];
+  const lbTbody = rowsB.map((r, i) => {
+    const rank = i < 3 ? `<span class="medal">${medals[i]}</span>` : `${i + 1}.`;
+    const count = i < 3 ? `<span class="lb-count">${r.sessions}</span>` : r.sessions;
+    return `<tr>
+      <td style="width:36px">${rank}</td>
+      <td class="lb-name">${friendlyName(r.initiator)}</td>
+      <td>${count}</td>
+    </tr>`;
+  }).join('');
+
+  // Date labels
+  const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const todayDate = new Date(today + 'T12:00:00');
+  const fullDays = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const todayLabel = `${fullDays[todayDate.getDay()]} ${todayDate.getDate()} ${MONTHS[todayDate.getMonth()]} ${todayDate.getFullYear()}`;
+  const monDate = new Date(monday + 'T12:00:00');
+  const monLabel = `Mon ${monDate.getDate()}`;
+
+  document.getElementById('header-sub').textContent = `⚡ Live · ${todayLabel}`;
+
+  document.getElementById('app').innerHTML = `
+    <div class="section">
+      <div class="section-title">📍 Today so far — vs adaptive daily goal</div>
+      <table>
+        <thead><tr><th>Metric</th><th>Today</th><th>Today's goal</th><th>Progress</th></tr></thead>
+        <tbody>${todayTbody}</tbody>
+      </table>
+      <div class="callout">🎯 Goal = (monthly target − MTD) ÷ Mon–Fri working days left. Floor: 25. Cap: 1.2× flat daily rate. Beat it and tomorrow gets easier.</div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">📅 This week (${monLabel} → now) — vs plan pace</div>
+      <table>
+        <thead><tr><th>Metric</th><th>Week so far</th><th>Plan pace</th><th>Progress</th><th>Last week (full)</th></tr></thead>
+        <tbody>${weekTbody}</tbody>
+      </table>
+    </div>
+
+    <div class="section">
+      <div class="section-title">🗓️ Yesterday (${yestDow}) vs ${priorDow} last week</div>
+      <table>
+        <thead><tr><th>Metric</th><th>Yesterday</th><th>${priorDow} last week</th><th>Trend</th></tr></thead>
+        <tbody>${yestTbody}</tbody>
+      </table>
+    </div>
+
+    <div class="section">
+      <div class="section-title">🏆 Mechanic leaderboard — this week</div>
+      <table>
+        <thead><tr><th></th><th>Mechanic</th><th>Repairs</th></tr></thead>
+        <tbody>${lbTbody}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+// ── INIT ───────────────────────────────────────────────────────────
+
+async function init() {
+  document.getElementById('app').innerHTML =
+    '<div class="loading"><span class="dots"><span>●</span><span>●</span><span>●</span></span> Loading…</div>';
+  document.getElementById('updated-at').textContent = '—';
+
+  let token;
+  try {
+    token = await authenticate();
+  } catch (e) {
+    document.getElementById('app').innerHTML =
+      `<div class="error-box">
+        <strong>Authentication failed</strong><br>
+        ${e.message}<br><br>
+        <small>If you see a CORS error in the console, ask your Metabase admin to enable cross-origin access, or deploy a Cloudflare Worker proxy.</small>
+      </div>`;
+    return;
+  }
+
+  let rA, rB, rC;
+  try {
+    [rA, rB, rC] = await Promise.all([
+      query(SQL_A, token),
+      query(SQL_B, token),
+      query(SQL_C, token)
+    ]);
+  } catch (e) {
+    document.getElementById('app').innerHTML =
+      `<div class="error-box"><strong>Query failed</strong><br>${e.message}</div>`;
+    return;
+  }
+
+  if (!rC || rC.length === 0) {
+    document.getElementById('app').innerHTML =
+      '<div class="error-box">Goal query returned no data.</div>';
+    return;
+  }
+
+  render(rA, rB, rC[0]);
+
+  document.getElementById('updated-at').textContent = new Date().toLocaleString('en-US', {
+    timeZone: 'America/New_York', month: 'short', day: 'numeric',
+    hour: '2-digit', minute: '2-digit'
+  });
+}
+
+init();
+</script>
+</body>
+</html>
