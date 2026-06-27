@@ -134,12 +134,7 @@ tr:last-child td { border-bottom: none; }
 </div>
 
 <script>
-// ── CONFIG — fill in METABASE_PASS before pushing ──────────────────
-const METABASE_URL  = 'https://metabase.upway.app';
-const METABASE_USER = 'jareth@upway.shop';
-const METABASE_PASS = 'Y2zQsYWQWX!Qm3n';
-const DB = 6;
-// ──────────────────────────────────────────────────────────────────
+// No credentials needed — data is fetched from data.json in this repo.
 
 const HOLIDAYS = new Set([
   '2026-06-19','2026-07-03','2026-09-07',
@@ -383,31 +378,7 @@ function sum(rows, key) {
 
 // ── METABASE API ───────────────────────────────────────────────────
 
-async function authenticate() {
-  const r = await fetch(`${METABASE_URL}/api/session`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: METABASE_USER, password: METABASE_PASS })
-  });
-  if (!r.ok) throw new Error(`Auth ${r.status}: check credentials`);
-  return (await r.json()).id;
-}
-
-async function query(sql, token) {
-  const r = await fetch(`${METABASE_URL}/api/dataset`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Metabase-Session': token
-    },
-    body: JSON.stringify({ database: DB, native: { query: sql }, type: 'native' })
-  });
-  if (!r.ok) throw new Error(`Query ${r.status}`);
-  const d = await r.json();
-  if (d.error) throw new Error(d.error);
-  const cols = d.data.cols.map(c => c.name);
-  return d.data.rows.map(row => Object.fromEntries(cols.map((c, i) => [c, row[i]])));
-}
+// (Data is fetched from data.json — no Metabase API calls needed here)
 
 // ── RENDER ─────────────────────────────────────────────────────────
 
@@ -557,51 +528,45 @@ function render(rowsA, rowsB, goals) {
   `;
 }
 
-// ── INIT ───────────────────────────────────────────────────────────
+// ── INIT — reads from data.json (same origin, no CORS) ────────────
 
 async function init() {
   document.getElementById('app').innerHTML =
     '<div class="loading"><span class="dots"><span>●</span><span>●</span><span>●</span></span> Loading…</div>';
   document.getElementById('updated-at').textContent = '—';
 
-  let token;
+  let payload;
   try {
-    token = await authenticate();
+    // Cache-busted so Refresh button always gets the latest file
+    const r = await fetch('data.json?t=' + Date.now());
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    payload = await r.json();
   } catch (e) {
     document.getElementById('app').innerHTML =
       `<div class="error-box">
-        <strong>Authentication failed</strong><br>
-        ${e.message}<br><br>
-        <small>If you see a CORS error in the console, ask your Metabase admin to enable cross-origin access, or deploy a Cloudflare Worker proxy.</small>
+        <strong>Could not load data.json</strong><br>${e.message}<br><br>
+        <small>Data is written by GitHub Actions every ~30 min. On a fresh deploy, go to the repo Actions tab, run "Refresh NY Dashboard" manually, then wait ~1 min.</small>
       </div>`;
     return;
   }
 
-  let rA, rB, rC;
-  try {
-    [rA, rB, rC] = await Promise.all([
-      query(SQL_A, token),
-      query(SQL_B, token),
-      query(SQL_C, token)
-    ]);
-  } catch (e) {
+  const { daily, leaderboard, goals, updated_at } = payload;
+
+  if (!goals || !daily) {
     document.getElementById('app').innerHTML =
-      `<div class="error-box"><strong>Query failed</strong><br>${e.message}</div>`;
+      '<div class="error-box">data.json is malformed — check the latest Actions run.</div>';
     return;
   }
 
-  if (!rC || rC.length === 0) {
-    document.getElementById('app').innerHTML =
-      '<div class="error-box">Goal query returned no data.</div>';
-    return;
-  }
+  render(daily, leaderboard || [], goals);
 
-  render(rA, rB, rC[0]);
-
-  document.getElementById('updated-at').textContent = new Date().toLocaleString('en-US', {
-    timeZone: 'America/New_York', month: 'short', day: 'numeric',
-    hour: '2-digit', minute: '2-digit'
-  });
+  // Show when the Action last ran, not when the page loaded
+  const dt = new Date(updated_at);
+  document.getElementById('updated-at').textContent =
+    'Data as of: ' + dt.toLocaleString('en-US', {
+      timeZone: 'America/New_York', month: 'short', day: 'numeric',
+      hour: '2-digit', minute: '2-digit'
+    }) + ' ET';
 }
 
 init();
