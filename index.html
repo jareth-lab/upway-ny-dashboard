@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>🗽 NY Facility Dashboard</title>
+<title>ð½ NY Facility Dashboard</title>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
@@ -120,28 +120,29 @@ tr:last-child td { border-bottom: none; }
 
 <div class="header">
   <div>
-    <div class="header-title">🗽 New York Facility Dashboard</div>
-    <div class="header-sub" id="header-sub">Live · refreshes on page load</div>
+    <div class="header-title">ð½ New York Facility Dashboard</div>
+    <div class="header-sub" id="header-sub">Live Â· refreshes on page load</div>
   </div>
   <div class="header-right">
-    <div class="updated-at" id="updated-at">—</div>
-    <button class="refresh-btn" onclick="init()">↺ Refresh</button>
+    <div class="updated-at" id="updated-at">â</div>
+    <button class="refresh-btn" onclick="init()">âº Refresh</button>
   </div>
 </div>
 
 <div id="app">
-  <div class="loading"><span class="dots"><span>●</span><span>●</span><span>●</span></span></div>
+  <div class="loading"><span class="dots"><span>â</span><span>â</span><span>â</span></span></div>
 </div>
 
 <script>
-// No credentials needed — data is fetched from data.json in this repo.
+// Paste your Google Apps Script web app URL here after deploying proxy.gs
+const PROXY_URL = 'https://script.google.com/a/macros/upway.shop/s/AKfycby4UdB1JK8NVmSonv-sBlbEm6cSLV1X6W6Ailo8brXcB8OJ_kiqd1QdtZmDSut_5qSX/exec';
 
 const HOLIDAYS = new Set([
   '2026-06-19','2026-07-03','2026-09-07',
   '2026-11-11','2026-11-26','2026-12-25'
 ]);
 
-// ── QUERIES ────────────────────────────────────────────────────────
+// ââ QUERIES ââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 const SQL_A = `
 WITH ny_bikes AS (
@@ -260,155 +261,38 @@ chk AS (
   FROM \`upway-331113.prod_public.BikeCheckinSession\` c
   JOIN ny_bikes nb ON CAST(c.bikeId AS STRING)=nb.bike_id
   CROSS JOIN tgt t
-  WHERE DATE(c.endedAt,'America/New_York') >= t.m_start
-),
-ev AS (
-  SELECT u.itemId, u.name,
-    JSON_EXTRACT_SCALAR(u.details,'$.step') AS step,
-    DATE(u.date,'America/New_York') AS d
-  FROM \`upway-331113.prod_public.Update\` u
-  JOIN ny_bikes nb ON u.itemId=nb.bike_id
-  CROSS JOIN tgt t
-  WHERE u.itemType='bike' AND DATE(u.date,'America/New_York') >= t.m_start
-),
-upl AS (
-  SELECT COUNTIF(d=t.today) today_n, COUNTIF(d<t.today) mtd
-  FROM ev CROSS JOIN tgt t WHERE name='toPrepareForUpload'
-),
-rep AS (
-  SELECT COUNTIF(d=t.today) today_n, COUNTIF(d<t.today) mtd
-  FROM ev CROSS JOIN tgt t WHERE name='repairSessionFinished'
-),
-shp_days AS (
-  SELECT d, COUNT(DISTINCT itemId) n FROM ev
-  WHERE name='checkoutStepSucceeded' AND step='packaging' GROUP BY d
-),
-shp AS (
-  SELECT
-    COALESCE(SUM(IF(d=t.today,n,0)),0) today_n,
-    COALESCE(SUM(IF(d<t.today,n,0)),0) mtd
-  FROM shp_days CROSS JOIN tgt t
-)
-SELECT
-  GREATEST(25, LEAST(
-    ROUND(GREATEST(tgt.t_flow-chk.mtd,0)/GREATEST(dleft.n,1)),
-    ROUND(tgt.t_flow/dtotal.n * 1.2)
-  )) AS checkins_goal,
-  ROUND(100*chk.today_n/GREATEST(GREATEST(25,LEAST(
-    ROUND(GREATEST(tgt.t_flow-chk.mtd,0)/GREATEST(dleft.n,1)),
-    ROUND(tgt.t_flow/dtotal.n*1.2))),1)) AS checkins_pct,
-  GREATEST(25, LEAST(
-    ROUND(GREATEST(tgt.t_flow-upl.mtd,0)/GREATEST(dleft.n,1)),
-    ROUND(tgt.t_flow/dtotal.n * 1.2)
-  )) AS uploads_goal,
-  ROUND(100*upl.today_n/GREATEST(GREATEST(25,LEAST(
-    ROUND(GREATEST(tgt.t_flow-upl.mtd,0)/GREATEST(dleft.n,1)),
-    ROUND(tgt.t_flow/dtotal.n*1.2))),1)) AS uploads_pct,
-  GREATEST(25, LEAST(
-    ROUND(GREATEST(tgt.t_flow-rep.mtd,0)/GREATEST(dleft.n,1)),
-    ROUND(tgt.t_flow/dtotal.n * 1.2)
-  )) AS repairs_goal,
-  ROUND(100*rep.today_n/GREATEST(GREATEST(25,LEAST(
-    ROUND(GREATEST(tgt.t_flow-rep.mtd,0)/GREATEST(dleft.n,1)),
-    ROUND(tgt.t_flow/dtotal.n*1.2))),1)) AS repairs_pct,
-  GREATEST(25, LEAST(
-    ROUND(GREATEST(tgt.t_ship-shp.mtd,0)/GREATEST(dleft.n,1)),
-    ROUND(tgt.t_ship/dtotal.n * 1.2)
-  )) AS shipments_goal,
-  ROUND(100*shp.today_n/GREATEST(GREATEST(25,LEAST(
-    ROUND(GREATEST(tgt.t_ship-shp.mtd,0)/GREATEST(dleft.n,1)),
-    ROUND(tgt.t_ship/dtotal.n*1.2))),1)) AS shipments_pct
-FROM chk, upl, rep, shp, tgt, dleft, dtotal`;
-
-// ── HELPERS ────────────────────────────────────────────────────────
-
-function todayET() {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date());
-}
-
-function addDays(dateStr, n) {
-  const d = new Date(dateStr + 'T12:00:00');
-  d.setDate(d.getDate() + n);
-  return d.toISOString().slice(0, 10);
-}
-
-function mondayOf(dateStr) {
-  const d = new Date(dateStr + 'T12:00:00');
-  const dow = d.getDay(); // 0=Sun
-  const diff = dow === 0 ? -6 : 1 - dow;
-  return addDays(dateStr, diff);
-}
-
-function weekPace(mondayStr) {
-  // Mon–Sat of this week, 21/day, minus holidays
-  let count = 0;
-  for (let i = 0; i < 6; i++) {
-    const d = addDays(mondayStr, i);
-    if (!HOLIDAYS.has(d)) count++;
-  }
-  return count * 21;
-}
-
-function bar(pct) {
-  const n = Math.min(Math.round(pct / 10), 10);
-  return '🟪'.repeat(n) + '⬜'.repeat(10 - n);
-}
-
-function trendCell(now, prev, invertGood = false) {
-  if (!prev) return '<span class="flat">■ —</span>';
-  const pct = Math.round((now - prev) / prev * 100);
-  if (pct === 0) return '<span class="flat">■ 0%</span>';
-  const up = pct > 0;
-  const good = invertGood ? !up : up;
-  const cls = good ? 'good' : 'bad';
-  const icon = good ? '🟢' : '🔴';
-  const arrow = up ? '▲' : '▼';
-  const sign = up ? '+' : '';
-  return `<span class="${cls}">${icon} ${arrow} ${sign}${pct}%</span>`;
-}
-
-function friendlyName(email) {
-  return (email || '').split('@')[0].split('.')
-    .map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(' ');
-}
-
-function sum(rows, key) {
-  return rows.reduce((a, r) => a + (Number(r[key]) || 0), 0);
-}
-
-// ── METABASE API ───────────────────────────────────────────────────
-
-// (Data is fetched from data.json — no Metabase API calls needed here)
-
-// ── RENDER ─────────────────────────────────────────────────────────
-
-function render(rowsA, rowsB, goals) {
-  const today = todayET();
-  const yesterday = addDays(today, -1);
-  const monday = mondayOf(today);
-  const lastMonday = addDays(monday, -7);
-  const lastSunday = addDays(monday, -1);
-  const priorWeekDay = addDays(yesterday, -7);
-  const pace = weekPace(monday);
-
-  // Index by date
-  const byDate = Object.fromEntries(rowsA.map(r => [r.day, r]));
-
-  const todayRow = byDate[today]     || {};
-  const yestRow  = byDate[yesterday] || {};
-  const priorRow = byDate[priorWeekDay] || {};
-
-  const weekRows = rowsA.filter(r => r.day >= monday && r.day <= today);
-  const lwRows   = rowsA.filter(r => r.day >= lastMonday && r.day <= lastSunday);
-
-  const metrics = [
-    { label: '✅ Check-ins',         key: 'checkins',   goal: goals.checkins_goal,  pct: goals.checkins_pct,  hasGoal: true },
-    { label: '📸 Photos taken',      key: 'photos',                                                            hasGoal: false },
-    { label: '⬆️ Upload list',       key: 'upload_list', goal: goals.uploads_goal,  pct: goals.uploads_pct,   hasGoal: true },
-    { label: '🔧 Repairs',           key: 'repairs',    goal: goals.repairs_goal,   pct: goals.repairs_pct,   hasGoal: true },
-    { label: '📦 Shipments',         key: 'shipments',  goal: goals.shipments_goal, pct: goals.shipments_pct, hasGoal: true },
-    { label: '🔴 Into Red Zone',     key: 'redzone_in',                                                        hasGoal: false },
-    { label: '🟢 Out of Red Zone',   key: 'redzone_out',                                                       hasGoal: false },
+  WHERE DAEQ(¡Q9Ð°µÉ¥½9Ý}e½É¬¤øôÐ¹µ}ÍÑÉÐ(¤°)ØL (M1
+PÔ¹¥Ñµ%°Ô¹¹µ°()M=9}aQI
+Q}M
+1H¡Ô¹Ñ¥±Ì°¹ÍÑÀ¤LÍÑÀ°(Q¡Ô¹Ñ°µÉ¥½9Ý}e½É¬¤L(I=4qÕÁÝä´ÌÌÄÄÄÌ¹ÁÉ½}ÁÕ±¥¹UÁÑqÔ()=%8¹å}¥­Ì¹=8Ô¹¥Ñµ%õ¹¹¥­}¥(
+I=ML)=%8ÑÐÐ(]!IÔ¹¥ÑµQåÁô¥­9Q¡Ô¹Ñ°µÉ¥½9Ý}e½É¬¤øôÐ¹µ}ÍÑÉÐ(¤°)ÕÁ°L (M1
+P
+=U9Q%¡õÐ¹Ñ½ä¤Ñ½å}¸°
+=U9Q%¡ñÐ¹Ñ½ä¤µÑ(I=4Ø
+I=ML)=%8ÑÐÐ]!I¹µôÑ½AÉÁÉ½ÉUÁ±½(¤°)ÉÀL (M1
+P
+=U9Q%¡õÐ¹Ñ½ä¤Ñ½å}¸°
+=U9Q%¡ñÐ¹Ñ½ä¤µÑ(I=4Ø
+I=ML)=%8ÑÐÐ]!I¹µôÉÁ¥ÉMÍÍ¥½¹¥¹¥Í¡(¤°)Í¡Á}åÌL (M1
+P°
+=U9P¡%MQ%9
+P¥Ñµ%¤¸I=4Ø(]!I¹µô¡­½ÕÑMÑÁMÕ9ÍÑÀôÁ­¥¹I=U@	d(¤°)Í¡ÀL (M1
+P(
+=1M
+¡MU4¡%¡õÐ¹Ñ½ä±¸°À¤¤°À¤Ñ½å}¸°(
+=1M
+¡MU4¡%¡ñÐ¹Ñ½ä±¸°À¤¤°À¤µÑ(I=4Í¡Á}åÌ
+I=ML)=%8ÑÐÐ(¤)M1
+P(IQMP ÈÔ°1MP (I=U9¡IQMP¡ÑÐ¹Ñ}±½Üµ¡¬¹µÑ°À¤½IQMP¡±Ð¹¸°Ä¤¤°(I=U9¡ÑÐ¹Ñ}±½Ü½Ñ½Ñ°¹¸¨Ä¸È¤(¤¤L¡­¥¹Í}½°°(I=U9 ÄÀÀ©¡¬¹Ñ½å}¸½IQMP¡IQMP ÈÔ±1MP (I=U9¡IQMP¡ÑÐ¹Ñ}±½Üµ¡¬¹µÑ°À¤½IQMP¡±Ð¹¸°Ä¤¤°(I=U9¡ÑÐ¹Ñ}±½Ü½Ñ½Ñ°¹¸¨Ä¸È¤¤¤°Ä¤¤L¡­¥¹Í}ÁÐ°(IQMP ÈÔ°1MP (I=U9¡IQMP¡ÑÐ¹Ñ}±½ÜµÕÁ°¹µÑ°À¤½IQMP¡±Ð¹¸°Ä¤¤°(I=U9¡ÑÐ¹Ñ}±½Ü½Ñ½Ñ°¹¸¨Ä¸È¤(¤¤LÕÁ±½Í}½°°(I=U9 ÄÀÀ©ÕÁ°¹Ñ½å}¸½IQMP¡IQMP ÈÔ±1MP (I=U9¡IQMP¡ÑÐ¹Ñ}±½ÜµÕÁ°¹µÑ°À¤½IQMP¡±Ð¹¸°Ä¤¤°(I=U9¡ÑÐ¹Ñ}±½Ü½Ñ½Ñ°¹¸¨Ä¸È¤¤¤°Ä¤¤LÕÁ±½Í}ÁÐ°(IQMP ÈÔ°1MP (I=U9¡IQMP¡ÑÐ¹Ñ}±½ÜµÉÀ¹µÑ°À¤½IQMP¡±Ð¹¸°Ä¤¤°(I=U9¡ÑÐ¹Ñ}±½Ü½Ñ½Ñ°¹¸¨Ä¸È¤(¤¤LÉÁ¥ÉÍ}½°°(I=U9 ÄÀÀ©ÉÀ¹Ñ½å}¸½IQMP¡IQMP ÈÔ±1MP (I=U9¡IQMP¡ÑÐ¹Ñ}±½ÜµÉÀ¹µÑ°À¤½IQMP¡±Ð¹¸°Ä¤¤°(I=U9¡ÑÐ¹Ñ}±½Ü½Ñ½Ñ°¹¸¨Ä¸È¤¤¤°Ä¤¤LÉÁ¥ÉÍ}ÁÐ°(IQMP ÈÔ°1MP (I=U9¡IQMP¡ÑÐ¹Ñ}Í¡¥ÀµÍ¡À¹µÑ°À¤½IQMP¡±Ð¹¸°Ä¤¤°(I=U9¡ÑÐ¹Ñ}Í¡¥À½Ñ½Ñ°¹¸¨Ä¸È¤(¤¤LÍ¡¥Áµ¹ÑÍ}½°°(I=U9 ÄÀÀ©Í¡À¹Ñ½å}¸½IQMP¡IQMP ÈÔ±1MP (I=U9¡IQMP¡ÑÐ¹Ñ}Í¡¥ÀµÍ¡À¹µÑ°À¤½IQMP¡±Ð¹¸°Ä¤¤°(I=U9¡ÑÐ¹Ñ}Í¡¥À½Ñ½Ñ°¹¸¨Ä¸È¤¤¤°Ä¤¤LÍ¡¥Áµ¹ÑÍ}ÁÐ)I=4¡¬°ÕÁ°°ÉÀ°Í¡À°ÑÐ°±Ð°Ñ½Ñ±ì((¼¼RR !1AILRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR ()Õ¹Ñ¥½¸Ñ½åP ¤ì(ÉÑÕÉ¸¹Ü%¹Ñ°¹ÑQ¥µ½ÉµÐ ¸µ
+°ìÑ¥µi½¹èµÉ¥½9Ý}e½É¬ô¤¹½ÉµÐ¡¹ÜÑ ¤¤ì)ô()Õ¹Ñ¥½¸åÌ¡ÑMÑÈ°¸¤ì(½¹ÍÐô¹ÜÑ¡ÑMÑÈ¬PÄÈèÀÀèÀÀ¤ì(¹ÍÑÑ¡¹ÑÑ ¤¬¸¤ì(ÉÑÕÉ¸¹Ñ½%M=MÑÉ¥¹ ¤¹Í±¥ À°ÄÀ¤ì)ô()Õ¹Ñ¥½¸µ½¹å=¡ÑMÑÈ¤ì(½¹ÍÐô¹ÜÑ¡ÑMÑÈ¬PÄÈèÀÀèÀÀ¤ì(½¹ÍÐ½Üô¹Ñä ¤ì¼¼ÀõMÕ¸(½¹ÍÐ¥ô½ÜôôôÀü´ØèÄ´½Üì(ÉÑÕÉ¸åÌ¡ÑMÑÈ°¥¤ì)ô()Õ¹Ñ¥½¸Ý­A¡µ½¹åMÑÈ¤ì(¼¼5½»MMÐ½Ñ¡¥ÌÝ¬°ÈÄ½ä°µ¥¹ÕÌ¡½±¥åÌ(±Ð½Õ¹ÐôÀì(½È¡±Ð¤ôÀì¤ðØì¤¬¬¤ì(½¹ÍÐôåÌ¡µ½¹åMÑÈ°¤¤ì(¥ !=1%eL¹¡Ì¡¤¤½Õ¹Ð¬¬ì(ô(ÉÑÕÉ¸½Õ¹Ð¨ÈÄì)ô()Õ¹Ñ¥½¸È¡ÁÐ¤ì(½¹ÍÐ¸ô5Ñ ¹µ¥¸¡5Ñ ¹É½Õ¹¡ÁÐ¼ÄÀ¤°ÄÀ¤ì(ÉÑÕÉ¸Â~~¨¹ÉÁÐ¡¸¤¬²p¹ÉÁÐ ÄÀ´¸¤ì)ô()Õ¹Ñ¥½¸ÑÉ¹
+±°¡¹½Ü°ÁÉØ°¥¹ÙÉÑ½½ô±Í¤ì(¥ ÁÉØ¤ÉÑÕÉ¸ñÍÁ¸±ÍÌô±ÐûZPð½ÍÁ¸øì(½¹ÍÐÁÐô5Ñ ¹É½Õ¹ ¡¹½Ü´ÁÉØ¤¼ÁÉØ¨ÄÀÀ¤ì(¥¡ÁÐôôôÀ¤ÉÑÕÉ¸ñÍÁ¸±ÍÌô±ÐûZÀð½ÍÁ¸øì(½¹ÍÐÕÀôÁÐøÀì(½¹ÍÐ½½ô¥¹ÙÉÑ½½üÕÀèÕÀì(½¹ÍÐ±Ìô½½ü½½èì(½¹ÍÐ¥½¸ô½½üÂ~~èÂ~RÐì(½¹ÍÐÉÉ½ÜôÕÀüZÈèZðì(½¹ÍÐÍ¥¸ôÕÀü¬èì(ÉÑÕÉ¸ñÍÁ¸±ÍÌôí±Íôøí¥½¹ôíÉÉ½ÝôíÍ¥¹ôíÁÑôð½ÍÁ¸ùì)ô()Õ¹Ñ¥½¸É¥¹±å9µ¡µ¥°¤ì(ÉÑÕÉ¸¡µ¥°ñð¤¹ÍÁ±¥Ð  ¥lÁt¹ÍÁ±¥Ð ¸¤(¹µÀ¡ÌôøÌ¹¡ÉÐ À¤¹Ñ½UÁÁÉ
+Í ¤¬Ì¹Í±¥ Ä¤¤¹©½¥¸ ¤ì)ô()Õ¹Ñ¥½¸ÍÕ´¡É½ÝÌ°­ä¤ì(ÉÑÕÉ¸É½ÝÌ¹ÉÕ ¡°È¤ôø¬¡9ÕµÈ¡Ém­åt¤ñðÀ¤°À¤ì)ô((¼¼RR 5Q	MA$RRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR ((¼¼¡Ñ¥ÌÑ¡É½´Ñ¹©Í½¸P¹¼5ÑÍA$±±Ì¹¡É¤((¼¼RR I9HRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR ()Õ¹Ñ¥½¸É¹È¡É½ÝÍ°É½ÝÍ°½±Ì¤ì(½¹ÍÐÑ½äôÑ½åP ¤ì(½¹ÍÐåÍÑÉäôåÌ¡Ñ½ä°´Ä¤ì(½¹ÍÐµ½¹äôµ½¹å=¡Ñ½ä¤ì(½¹ÍÐ±ÍÑ5½¹äôåÌ¡µ½¹ä°´Ü¤ì(½¹ÍÐ±ÍÑMÕ¹äôåÌ¡µ½¹ä°´Ä¤ì(½¹ÍÐÁÉ¥½É]­äôåÌ¡åÍÑÉä°´Ü¤ì(½¹ÍÐÁôÝ­A¡µ½¹ä¤ì((¼¼%¹àäÑ(½¹ÍÐåÑô=©Ð¹É½µ¹ÑÉ¥Ì¡É½ÝÍ¹µÀ¡ÈôømÈ¹ä°Ét¤¤ì((½¹ÍÐÑ½åI½ÜôåÑmÑ½åtñðíôì(½¹ÍÐåÍÑI½ÜôåÑmåÍÑÉåtñðíôì(½¹ÍÐÁÉ¥½ÉI½ÜôåÑmÁÉ¥½É]­åtñðíôì((½¹ÍÐÝ­I½ÝÌôÉ½ÝÍ¹¥±ÑÈ¡ÈôøÈ¹äøôµ½¹äÈ¹äðôÑ½ä¤ì(½¹ÍÐ±ÝI½ÝÌôÉ½ÝÍ¹¥±ÑÈ¡ÈôøÈ¹äøô±ÍÑ5½¹äÈ¹äðô±ÍÑMÕ¹ä¤ì((½¹ÍÐµÑÉ¥Ìôl(ì±°èrCheck-ins',         key: 'checkins',   goal: goals.checkins_goal,  pct: goals.checkins_pct,  hasGoal: true },
+    { label: 'ð¸ Photos taken',      key: 'photos',                                                            hasGoal: false },
+    { label: 'â¬ï¸ Upload list',       key: 'upload_list', goal: goals.uploads_goal,  pct: goals.uploads_pct,   hasGoal: true },
+    { label: 'ð§ Repairs',           key: 'repairs',    goal: goals.repairs_goal,   pct: goals.repairs_pct,   hasGoal: true },
+    { label: 'ð¦ Shipments',         key: 'shipments',  goal: goals.shipments_goal, pct: goals.shipments_pct, hasGoal: true },
+    { label: 'ð´ Into Red Zone',     key: 'redzone_in',                                                        hasGoal: false },
+    { label: 'ð¢ Out of Red Zone',   key: 'redzone_out',                                                       hasGoal: false },
   ];
 
   // TODAY section
@@ -426,8 +310,8 @@ function render(rowsA, rowsB, goals) {
     return `<tr>
       <td>${m.label}</td>
       <td class="val-big">${val}</td>
-      <td class="muted">—</td>
-      <td class="muted">—</td>
+      <td class="muted">â</td>
+      <td class="muted">â</td>
     </tr>`;
   }).join('');
 
@@ -448,15 +332,15 @@ function render(rowsA, rowsB, goals) {
     return `<tr>
       <td>${m.label}</td>
       <td class="val-big">${wVal}</td>
-      <td class="muted">—</td>
-      <td class="muted">—</td>
+      <td class="muted">â</td>
+      <td class="muted">â</td>
       <td class="muted">${lwVal}</td>
     </tr>`;
   }).join('');
 
   // YESTERDAY section
-  const DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-  const yestDow = DAYS[new Date(yesterday + 'T12:00:00').getDay()];
+  const DAYS= ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const yestDow = DAYSA[new Date(yesterday + 'T12:00:00').getDay()];
   const priorDow = DAYS[new Date(priorWeekDay + 'T12:00:00').getDay()];
   const yestTbody = metrics.map(m => {
     const yVal = Number(yestRow[m.key] || 0);
@@ -471,7 +355,7 @@ function render(rowsA, rowsB, goals) {
   }).join('');
 
   // LEADERBOARD section
-  const medals = ['🥇','🥈','🥉'];
+  const medals = ['ð¥','ð¥','ð¥'];
   const lbTbody = rowsB.map((r, i) => {
     const rank = i < 3 ? `<span class="medal">${medals[i]}</span>` : `${i + 1}.`;
     const count = i < 3 ? `<span class="lb-count">${r.sessions}</span>` : r.sessions;
@@ -490,20 +374,20 @@ function render(rowsA, rowsB, goals) {
   const monDate = new Date(monday + 'T12:00:00');
   const monLabel = `Mon ${monDate.getDate()}`;
 
-  document.getElementById('header-sub').textContent = `⚡ Live · ${todayLabel}`;
+  document.getElementById('header-sub').textContent = `â¡ Live Â· ${todayLabel}`;
 
   document.getElementById('app').innerHTML = `
     <div class="section">
-      <div class="section-title">📍 Today so far — vs adaptive daily goal</div>
+      <div class="section-title">ð Today so far â vs adaptive daily goal</div>
       <table>
         <thead><tr><th>Metric</th><th>Today</th><th>Today's goal</th><th>Progress</th></tr></thead>
         <tbody>${todayTbody}</tbody>
       </table>
-      <div class="callout">🎯 Goal = (monthly target − MTD) ÷ Mon–Fri working days left. Floor: 25. Cap: 1.2× flat daily rate. Beat it and tomorrow gets easier.</div>
+      <div class="callout">ð¯ Goal = (monthly target â MTD) Ã· MonâFri working days left. Floor: 25. Cap: 1.2Ã flat daily rate. Beat it and tomorrow gets easier.</div>
     </div>
 
     <div class="section">
-      <div class="section-title">📅 This week (${monLabel} → now) — vs plan pace</div>
+      <div class="section-title">ð This week (${monLabel} â now) â vs plan pace</div>
       <table>
         <thead><tr><th>Metric</th><th>Week so far</th><th>Plan pace</th><th>Progress</th><th>Last week (full)</th></tr></thead>
         <tbody>${weekTbody}</tbody>
@@ -511,7 +395,7 @@ function render(rowsA, rowsB, goals) {
     </div>
 
     <div class="section">
-      <div class="section-title">🗓️ Yesterday (${yestDow}) vs ${priorDow} last week</div>
+      <div class="section-title">ðï¸ Yesterday (${yestDow}) vs ${priorDow} last week</div>
       <table>
         <thead><tr><th>Metric</th><th>Yesterday</th><th>${priorDow} last week</th><th>Trend</th></tr></thead>
         <tbody>${yestTbody}</tbody>
@@ -519,7 +403,7 @@ function render(rowsA, rowsB, goals) {
     </div>
 
     <div class="section">
-      <div class="section-title">🏆 Mechanic leaderboard — this week</div>
+      <div class="section-title">ð Mechanic leaderboard â this week</div>
       <table>
         <thead><tr><th></th><th>Mechanic</th><th>Repairs</th></tr></thead>
         <tbody>${lbTbody}</tbody>
@@ -528,24 +412,24 @@ function render(rowsA, rowsB, goals) {
   `;
 }
 
-// ── INIT — reads from data.json (same origin, no CORS) ────────────
+// ââ INIT â reads from data.json (same origin, no CORS) ââââââââââââ
 
 async function init() {
   document.getElementById('app').innerHTML =
-    '<div class="loading"><span class="dots"><span>●</span><span>●</span><span>●</span></span> Loading…</div>';
-  document.getElementById('updated-at').textContent = '—';
+    '<div class="loading"><span class="dots"><span>â</span><span>â</span><span>â</span></span> Loadingâ¦</div>';
+  document.getElementById('updated-at').textContent = 'â';
 
   let payload;
   try {
-    // Cache-busted so Refresh button always gets the latest file
-    const r = await fetch('data.json?t=' + Date.now());
+    const r = await fetch(PROXY_URL);
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     payload = await r.json();
+    if (payload.error) throw new Error(payload.error);
   } catch (e) {
     document.getElementById('app').innerHTML =
       `<div class="error-box">
-        <strong>Could not load data.json</strong><br>${e.message}<br><br>
-        <small>Data is written by GitHub Actions every ~30 min. On a fresh deploy, go to the repo Actions tab, run "Refresh NY Dashboard" manually, then wait ~1 min.</small>
+        <strong>Could not load data</strong><br>${e.message}<br><br>
+        <small>Check that PROXY_URL is set in index.html and the Apps Script is deployed as a web app with "Anyone" access.</small>
       </div>`;
     return;
   }
@@ -554,7 +438,7 @@ async function init() {
 
   if (!goals || !daily) {
     document.getElementById('app').innerHTML =
-      '<div class="error-box">data.json is malformed — check the latest Actions run.</div>';
+      '<div class="error-box">data.json is malformed â check the latest Actions run.</div>';
     return;
   }
 
