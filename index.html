@@ -457,7 +457,7 @@ function render(rowsA, rowsB, goals) {
 
   // YESTERDAY section
   const DAYS= ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-  const yestDow = DAYSA[new Date(yesterday + 'T12:00:00').getDay()];
+  const yestDow = DAYS[new Date(yesterday + 'T12:00:00').getDay()];
   const priorDow = DAYS[new Date(priorWeekDay + 'T12:00:00').getDay()];
   const yestTbody = metrics.map(m => {
     const yVal = Number(yestRow[m.key] || 0);
