@@ -343,7 +343,7 @@ function mondayOf(dateStr) {
 function weekPace(mondayStr) {
   // Mon–Sat of this week, 21/day, minus holidays
   let count = 0;
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < 5; i++) {
     const d = addDays(mondayStr, i);
     if (!HOLIDAYS.has(d)) count++;
   }
