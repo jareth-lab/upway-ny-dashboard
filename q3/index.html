@@ -40,7 +40,7 @@ td { padding:7px 16px; border-top:0.5px solid #f1efe8; vertical-align:middle; }
 <div class="header">
   <div>
     <div class="header-title">🗽 NY UpCenter — Q3 2026 Goals</div>
-    <div class="header-sub">Live · auto metrics from BigQuery · manual metrics from US Weekly View</div>
+    <div class="header-sub">Live · auto metrics from BigQuery · manual entries in <a href="https://docs.google.com/spreadsheets/d/10_IjvRpXasmIxUWhDMLXspAQApABotG3IUbeksI52jY/edit#gid=1982347934" target="_blank">Q3 Tracker tab</a> · click a goal title to deep-dive</div>
   </div>
   <div>
     <div class="updated-at" id="updated-at">—</div>
@@ -52,8 +52,10 @@ td { padding:7px 16px; border-top:0.5px solid #f1efe8; vertical-align:middle; }
 <div class="foot">Q3 targets from "NY UpCenter — Q3 2026 Goals" one-pager · parts $/bike = manual expenses ÷ bikes sold</div>
 
 <script>
-// NY Dashboard Apps Script proxy — Q3 route (deployed v7, 2026-07-13)
+// NY Dashboard Apps Script proxy — Q3 route (v10, 2026-07-13)
 const PROXY_URL = 'https://script.google.com/macros/s/AKfycby4UdB1JK8NVmSonv-sBlbEm6cSLV1X6W6Ailo8brXcB8OJ_kiqd1QdtZmDSut_5qSX/exec?view=q3';
+const SHEET = 'https://docs.google.com/spreadsheets/d/10_IjvRpXasmIxUWhDMLXspAQApABotG3IUbeksI52jY/edit#gid=';
+const GID = { ship: 974132960, repairs: 511888987, deliveries: 2016762282, pos: 2117408984, tracker: 1982347934 };
 
 // Monthly targets from the one-pager. null = no numeric target that month.
 const T = {
@@ -120,37 +122,42 @@ function render(d) {
   const shipPct = shipTotal ? Math.round(shipRows.reduce((a, s) => a + s.nextbizday_pct * s.shipped, 0) / shipTotal * 10) / 10 : null;
   const shipDetail = shipRows.map(s => s.grp + ' ' + s.nextbizday_pct + '%').join(' · ');
 
-  const goalSection = (title, rows, msGoal) => {
+  const goalSection = (title, rows, msGoal, gid) => {
     const ms = (d.manual.milestones || []).filter(x => x.goal === msGoal);
-    return '<div class="goal"><div class="goal-head"><div class="goal-title">' + title + '</div></div>' +
+    const t2 = gid ? '<a href="' + SHEET + gid + '" target="_blank" style="color:inherit;text-decoration:none;">' + title + ' <span style="color:#888780;font-size:12px;">↗ deep dive</span></a>' : title;
+    return '<div class="goal"><div class="goal-head"><div class="goal-title">' + t2 + '</div></div>' +
       '<table><tr><th>Metric</th><th>Current (' + m + ')</th><th>Target</th><th>Status</th><th></th></tr>' + rows + '</table>' +
       (ms.length ? '<div class="milestones">' + ms.map(x => '<div class="ms-row"><span class="ms-due">' + x.due + '</span><span>' + x.milestone + '</span>' + msChip(x.status) + '</div>').join('') + '</div>' : '') +
       '</div>';
   };
 
+  const dmg = (d.damage || []).find(x => x.pct != null);
+  const del = (d.delivered || [])[0] || {};
+
   let html = '';
   html += goalSection('1 · Gold Standard for Buyers, Sellers & Bike Shops',
-    row('damage', latestWeek(w, 'shipping_damage_pct'), 'latest weekly entry') +
-    row('warst', latestWeek(w, 'warst_pct'), 'latest weekly entry') +
+    row('damage', dmg ? dmg.pct : null, dmg ? 'week of ' + dmg.week + ' · auto from Weekly View (NYC)' : 'no data in Weekly View') +
+    row('warst', latestWeek(w, 'warst_pct'), 'manual weekly entry — Q3 Tracker tab') +
+    '<tr><td class="metric">Delivered to customers</td><td class="val">' + (del.delivered != null ? del.delivered : '—') + '</td><td class="muted">' + (del.day ? 'on ' + del.day : '') + '</td><td><span class="chip grey">info</span></td><td class="muted"><a href="' + SHEET + GID.deliveries + '" target="_blank">daily history ↗</a></td></tr>' +
     '<tr><td class="metric">Next-biz-day ship %</td><td class="val">' + (shipPct == null ? '—' : shipPct + '%') + '</td><td class="muted">baseline → target Jul 15</td><td><span class="chip grey">baselining</span></td><td class="muted">' + shipDetail + '</td></tr>' +
     '<tr><td class="metric">Check-in ≤24h / B2Ci ≤48h</td><td class="val">—</td><td class="muted">100%</td><td><span class="chip grey">instrumentation due Jul 31</span></td><td class="muted">US reception data not yet in Metabase</td></tr>',
-    1);
+    1, GID.ship);
 
   html += goalSection('2 · Operate at Maximum Efficiency',
     row('offline', d.offline.days, d.offline.count + ' bikes offline · ' + d.offline.uploads_per_day + ' uploads/day (28d avg)') +
-    row('repairs', avgRepairs, mechs.length + ' mechanics · month to date') +
+    row('repairs', avgRepairs, mechs.reduce((a, r) => a + r.repairs, 0) + ' repairs by ' + mechs.length + ' mechanics MTD · avg each, vs 75/full month · <a href="' + SHEET + GID.repairs + '" target="_blank">by mechanic ↗</a>') +
     row('parts', parts.per_bike, parts.expenses ? '$' + parts.expenses + ' expenses ÷ ' + parts.bikes_sold + ' sold' : 'enter weekly expenses in US Weekly View → Q3 Tracker') +
     '<tr><td class="metric">FDNY weekly battery audit</td><td class="val">' + w.filter(x => x.fdny_audit_done).length + '/13</td><td class="muted">13/13 by EOQ</td><td>' + (w.length && w[w.length - 1].fdny_audit_done ? '<span class="chip green">this week done</span>' : '<span class="chip amber">log this week</span>') + '</td><td></td></tr>',
-    2);
+    2, GID.repairs);
 
   html += goalSection('3 · Growth Engine',
-    row('instore', pos.instore_sales, sold.bikes_sold ? sold.bikes_sold + ' total NY sales this month' : '') +
+    row('instore', pos.instore_sales, sold.bikes_sold ? 'of ' + sold.bikes_sold + ' total NY sales this month, all channels (not a goal)' : '') +
     row('attach', pos.attach_pct) +
     row('maint', pos.maintenance_pct) +
     row('fitting', pos.fitting_pct) +
     row('reviews', latestWeek(w, 'new_5star_reviews_cum'), 'manual weekly entry') +
     row('rating', latestWeek(w, 'google_rating'), 'manual weekly entry'),
-    3);
+    3, GID.pos);
 
   document.getElementById('app').innerHTML = html;
   const dt = new Date(d.updated_at);
