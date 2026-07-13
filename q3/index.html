@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🗽 NY UpCenter — Q3 2026 Goals</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background:#f5f4f0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; font-size:14px; color:#1a1a18; padding:16px; max-width:960px; margin:0 auto; }
+.header { background:white; border:0.5px solid #e0ddd5; border-radius:12px; padding:12px 16px; display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:12px; }
+.header-title { font-size:17px; font-weight:600; }
+.header-sub { font-size:12px; color:#888780; margin-top:3px; }
+.updated-at { font-size:12px; color:#888780; margin-bottom:4px; text-align:right; }
+.refresh-btn { font-size:13px; padding:6px 12px; border:0.5px solid #d5d2c8; border-radius:8px; background:#fff; cursor:pointer; }
+.refresh-btn:hover { background:#f0efe9; }
+.goal { background:white; border:0.5px solid #e0ddd5; border-radius:12px; margin-bottom:12px; overflow:hidden; }
+.goal-head { padding:12px 16px; border-bottom:0.5px solid #eceae2; display:flex; justify-content:space-between; align-items:center; }
+.goal-title { font-weight:600; font-size:15px; }
+table { width:100%; border-collapse:collapse; }
+th { text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.4px; color:#888780; font-weight:500; padding:8px 16px 4px; }
+td { padding:7px 16px; border-top:0.5px solid #f1efe8; vertical-align:middle; }
+.metric { font-weight:500; }
+.val { font-weight:600; font-size:15px; }
+.muted { color:#888780; font-size:12px; }
+.chip { display:inline-block; font-size:11px; font-weight:600; padding:2px 9px; border-radius:10px; }
+.chip.green { background:#e5f4e3; color:#2c6b2f; }
+.chip.amber { background:#fdf0d8; color:#946200; }
+.chip.red { background:#fbe3e0; color:#a63325; }
+.chip.grey { background:#eeede7; color:#77766f; }
+.milestones { padding:6px 0 10px; }
+.ms-row { display:flex; gap:10px; padding:5px 16px; font-size:13px; align-items:baseline; }
+.ms-due { color:#888780; font-size:12px; min-width:78px; }
+.error-box { background:#fbe3e0; border-radius:10px; padding:14px 16px; margin:10px 0; font-size:13px; }
+.foot { text-align:center; color:#a8a79f; font-size:11px; padding:12px 0 24px; }
+.loading { text-align:center; color:#888780; padding:40px 0; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <div class="header-title">🗽 NY UpCenter — Q3 2026 Goals</div>
+    <div class="header-sub">Live · auto metrics from BigQuery · manual metrics from US Weekly View</div>
+  </div>
+  <div>
+    <div class="updated-at" id="updated-at">—</div>
+    <button class="refresh-btn" onclick="init(true)">↺ Refresh (recompute)</button>
+  </div>
+</div>
+
+<div id="app"><div class="loading">Loading…</div></div>
+<div class="foot">Q3 targets from "NY UpCenter — Q3 2026 Goals" one-pager · parts $/bike = manual expenses ÷ bikes sold</div>
+
+<script>
+// NY Dashboard Apps Script proxy — Q3 route (deployed v7, 2026-07-13)
+const PROXY_URL = 'https://script.google.com/macros/s/AKfycby4UdB1JK8NVmSonv-sBlbEm6cSLV1X6W6Ailo8brXcB8OJ_kiqd1QdtZmDSut_5qSX/exec?view=q3';
+
+// Monthly targets from the one-pager. null = no numeric target that month.
+const T = {
+  damage:   { '2026-07': 1.2, '2026-08': 1.2, '2026-09': 1.0, label: 'Shipping damage %', dir: 'below' },
+  warst:    { '2026-07': 6.0, '2026-08': 5.0, '2026-09': 4.0, label: 'WARST %', dir: 'below' },
+  offline:  { '2026-07': 12,  '2026-08': 10,  '2026-09': 10,  label: 'Offline stock (days)', dir: 'below' },
+  repairs:  { '2026-07': 75,  '2026-08': 75,  '2026-09': 75,  stretch: 85, label: 'Repairs / mechanic', dir: 'above' },
+  parts:    { '2026-07': 43,  '2026-08': 41,  '2026-09': 39,  label: 'Parts $ / bike sold', dir: 'below' },
+  instore:  { '2026-07': 18,  '2026-08': 28,  '2026-09': 40,  stretch: 60, label: 'In-store sales', dir: 'above' },
+  attach:   { '2026-07': 20,  '2026-08': 25,  '2026-09': 30,  stretch: 40, label: 'Accessory attach %', dir: 'above' },
+  maint:    { '2026-07': null,'2026-08': 5,   '2026-09': 10,  label: 'Maintenance pkg attach %', dir: 'above' },
+  fitting:  { '2026-07': 100, '2026-08': 100, '2026-09': 100, label: 'Fitting fee on basket %', dir: 'above' },
+  reviews:  { '2026-07': 5,   '2026-08': 15,  '2026-09': 25,  label: 'New 5★ reviews (cum.)', dir: 'above' },
+  rating:   { '2026-07': null,'2026-08': null,'2026-09': 4.7, label: 'Google rating', dir: 'above' }
+};
+
+const curMonth = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' }).slice(0, 7);
+
+function rag(key, val) {
+  const t = T[key]; const m = curMonth(); const target = t[m];
+  if (val == null) return ['grey', 'no data'];
+  if (target == null) return ['grey', 'no target yet'];
+  const good = t.dir === 'below' ? val <= target : val >= target;
+  if (good) return ['green', 'on track'];
+  const close = t.dir === 'below' ? val <= target * 1.15 : val >= target * 0.85;
+  return close ? ['amber', 'close'] : ['red', 'off track'];
+}
+
+function row(key, val, extra) {
+  const t = T[key]; const m = curMonth(); const target = t[m];
+  const [cls, txt] = rag(key, val);
+  const tgt = target == null ? '—' : (t.dir === 'below' ? '≤ ' : '≥ ') + target + (t.stretch ? ' (' + t.stretch + ' stretch)' : '');
+  return '<tr><td class="metric">' + t.label + '</td><td class="val">' + (val == null ? '—' : val) + '</td><td class="muted">' + tgt +
+    '</td><td><span class="chip ' + cls + '">' + txt + '</span></td><td class="muted">' + (extra || '') + '</td></tr>';
+}
+
+function latestWeek(weeks, field) {
+  for (let i = weeks.length - 1; i >= 0; i--) if (weeks[i][field] != null) return weeks[i][field];
+  return null;
+}
+function monthRow(arr, month) { return arr.find(r => r.month === month) || {}; }
+
+function msChip(s) {
+  s = (s || '').toLowerCase();
+  if (s.includes('done')) return '<span class="chip green">done</span>';
+  if (s.includes('risk') || s.includes('block')) return '<span class="chip red">' + s + '</span>';
+  return '<span class="chip amber">' + s + '</span>';
+}
+
+function render(d) {
+  const m = curMonth();
+  const w = d.manual.weeks || [];
+  const pos = monthRow(d.pos, m);
+  const parts = monthRow(d.parts, m);
+  const sold = monthRow(d.sold, m);
+
+  // repairs: pace = current avg per mechanic projected to month end
+  const mechs = d.repairs.filter(r => r.month === m);
+  const avgRepairs = mechs.length ? Math.round(mechs.reduce((a, r) => a + r.repairs, 0) / mechs.length * 10) / 10 : null;
+
+  // ship: overall next-biz-day % this month + per-carrier detail
+  const shipRows = d.ship.filter(s => s.month === m);
+  const shipTotal = shipRows.reduce((a, s) => a + s.shipped, 0);
+  const shipPct = shipTotal ? Math.round(shipRows.reduce((a, s) => a + s.nextbizday_pct * s.shipped, 0) / shipTotal * 10) / 10 : null;
+  const shipDetail = shipRows.map(s => s.grp + ' ' + s.nextbizday_pct + '%').join(' · ');
+
+  const goalSection = (title, rows, msGoal) => {
+    const ms = (d.manual.milestones || []).filter(x => x.goal === msGoal);
+    return '<div class="goal"><div class="goal-head"><div class="goal-title">' + title + '</div></div>' +
+      '<table><tr><th>Metric</th><th>Current (' + m + ')</th><th>Target</th><th>Status</th><th></th></tr>' + rows + '</table>' +
+      (ms.length ? '<div class="milestones">' + ms.map(x => '<div class="ms-row"><span class="ms-due">' + x.due + '</span><span>' + x.milestone + '</span>' + msChip(x.status) + '</div>').join('') + '</div>' : '') +
+      '</div>';
+  };
+
+  let html = '';
+  html += goalSection('1 · Gold Standard for Buyers, Sellers & Bike Shops',
+    row('damage', latestWeek(w, 'shipping_damage_pct'), 'latest weekly entry') +
+    row('warst', latestWeek(w, 'warst_pct'), 'latest weekly entry') +
+    '<tr><td class="metric">Next-biz-day ship %</td><td class="val">' + (shipPct == null ? '—' : shipPct + '%') + '</td><td class="muted">baseline → target Jul 15</td><td><span class="chip grey">baselining</span></td><td class="muted">' + shipDetail + '</td></tr>' +
+    '<tr><td class="metric">Check-in ≤24h / B2Ci ≤48h</td><td class="val">—</td><td class="muted">100%</td><td><span class="chip grey">instrumentation due Jul 31</span></td><td class="muted">US reception data not yet in Metabase</td></tr>',
+    1);
+
+  html += goalSection('2 · Operate at Maximum Efficiency',
+    row('offline', d.offline.days, d.offline.count + ' bikes offline · ' + d.offline.uploads_per_day + ' uploads/day (28d avg)') +
+    row('repairs', avgRepairs, mechs.length + ' mechanics · month to date') +
+    row('parts', parts.per_bike, parts.expenses ? '$' + parts.expenses + ' expenses ÷ ' + parts.bikes_sold + ' sold' : 'enter weekly expenses in US Weekly View → Q3 Tracker') +
+    '<tr><td class="metric">FDNY weekly battery audit</td><td class="val">' + w.filter(x => x.fdny_audit_done).length + '/13</td><td class="muted">13/13 by EOQ</td><td>' + (w.length && w[w.length - 1].fdny_audit_done ? '<span class="chip green">this week done</span>' : '<span class="chip amber">log this week</span>') + '</td><td></td></tr>',
+    2);
+
+  html += goalSection('3 · Growth Engine',
+    row('instore', pos.instore_sales, sold.bikes_sold ? sold.bikes_sold + ' total NY sales this month' : '') +
+    row('attach', pos.attach_pct) +
+    row('maint', pos.maintenance_pct) +
+    row('fitting', pos.fitting_pct) +
+    row('reviews', latestWeek(w, 'new_5star_reviews_cum'), 'manual weekly entry') +
+    row('rating', latestWeek(w, 'google_rating'), 'manual weekly entry'),
+    3);
+
+  document.getElementById('app').innerHTML = html;
+  const dt = new Date(d.updated_at);
+  document.getElementById('updated-at').textContent = 'Data as of: ' + dt.toLocaleString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) + ' ET';
+}
+
+async function init(fresh) {
+  document.getElementById('app').innerHTML = '<div class="loading">Loading' + (fresh ? ' fresh data (can take ~30s)' : '') + '…</div>';
+  try {
+    const r = await fetch(PROXY_URL + (fresh ? '&fresh=1' : ''));
+    const d = await r.json();
+    render(d);
+  } catch (e) {
+    document.getElementById('app').innerHTML = '<div class="error-box"><strong>Could not load data</strong><br>' + e.message +
+      '<br><br><small>Check PROXY_URL in q3/index.html and that the Apps Script is deployed as a web app with "Anyone" access (URL must be script.google.com/macros/s/…).</small></div>';
+  }
+}
+init();
+</script>
+</body>
+</html>
