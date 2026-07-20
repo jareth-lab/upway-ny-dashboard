@@ -52,7 +52,7 @@ td { padding:7px 16px; border-top:0.5px solid #f1efe8; vertical-align:middle; }
 <div class="foot">Q3 targets from "NY UpCenter — Q3 2026 Goals" one-pager · parts $/bike = manual expenses ÷ bikes sold</div>
 
 <script>
-// NY Dashboard Apps Script proxy — Q3 route (v12, 2026-07-20: Claude-owned sheet, delivered metric removed)
+// NY Dashboard Apps Script proxy — Q3 route (v13, 2026-07-20: run-rate repair pacing, auto WARST, offline zone breakdown, milestones fix)
 const PROXY_URL = 'https://script.google.com/macros/s/AKfycby4UdB1JK8NVmSonv-sBlbEm6cSLV1X6W6Ailo8brXcB8OJ_kiqd1QdtZmDSut_5qSX/exec?view=q3';
 const SHEET = 'https://docs.google.com/spreadsheets/d/1RH7cMiEPwvRNRKU4U-FRdPKcie4emY58efsekbCvxdI/edit#gid=';
 const GID = { ship: 1811176419, repairs: 1433460832, pos: 1189328347, tracker: 0, mechanics: 1572063055, checkins: 981706326 };
@@ -92,6 +92,16 @@ return '<tr><td class="metric">' + t.label + '</td><td class="val">' + (val == n
 '</td><td><span class="chip ' + cls + '">' + txt + '</span></td><td class="muted">' + (extra || '') + '</td></tr>';
 }
 
+// Row for a value already expressed as "% of goal" — for pacing metrics, not raw point-in-time comparisons.
+function pctRow(label, pct, extra) {
+let cls, txt;
+if (pct == null) { cls = 'grey'; txt = 'no data'; }
+else if (pct >= 100) { cls = 'green'; txt = 'on track'; }
+else if (pct >= 85) { cls = 'amber'; txt = 'close'; }
+else { cls = 'red'; txt = 'off track'; }
+return '<tr><td class="metric">' + label + '</td><td class="val">' + (pct == null ? '—' : pct + '%') + '</td><td class="muted">100% of goal</td><td><span class="chip ' + cls + '">' + txt + '</span></td><td class="muted">' + (extra || '') + '</td></tr>';
+}
+
 function latestWeek(weeks, field) {
 for (let i = weeks.length - 1; i >= 0; i--) if (weeks[i][field] != null) return weeks[i][field];
 return null;
@@ -112,15 +122,26 @@ const pos = monthRow(d.pos, m);
 const parts = monthRow(d.parts, m);
 const sold = monthRow(d.sold, m);
 
-// repairs: pace = current avg per mechanic projected to month end
-const mechs = d.repairs.filter(r => r.month === m);
-const avgRepairs = mechs.length ? Math.round(mechs.reduce((a, r) => a + r.repairs, 0) / mechs.length * 10) / 10 : null;
+// Shipping damage %: latest week with data, auto-read from Weekly View (NYC block)
+const dmg = (d.damage || []).find(x => x.pct != null);
+
+// WARST %: latest week with data, auto-read from Weekly View (NYC block, column CJ) — replaces manual entry
+const wst = (d.warst || []).find(x => x.pct != null);
+
+// Repairs: run-rate pacing from backend (MTD ÷ headcount ÷ days elapsed × days in month, vs 75/mechanic/month goal)
+const rp = d.repair_pacing || null;
 
 // ship: overall next-biz-day % this month + per-carrier detail
 const shipRows = d.ship.filter(s => s.month === m);
 const shipTotal = shipRows.reduce((a, s) => a + s.shipped, 0);
 const shipPct = shipTotal ? Math.round(shipRows.reduce((a, s) => a + s.nextbizday_pct * s.shipped, 0) / shipTotal * 10) / 10 : null;
 const shipDetail = shipRows.map(s => s.grp + ' ' + s.nextbizday_pct + '%').join(' · ');
+
+// Offline stock: zone breakdown (fail/backlog/workshop/redzone) so the headline count is explainable
+const off = d.offline || {};
+const offDetail = off.count != null
+? off.count + ' bikes offline (Fail ' + (off.fail ?? '—') + ' · Backlog ' + (off.backlog ?? '—') + ' · Workshop ' + (off.workshop ?? '—') + ' · Redzone ' + (off.redzone ?? '—') + ') · ' + off.uploads_per_day + ' uploads/day (28d avg)'
+: '';
 
 const goalSection = (title, rows, msGoal, gid) => {
 const ms = (d.manual.milestones || []).filter(x => x.goal === msGoal);
@@ -131,19 +152,19 @@ return '<div class="goal"><div class="goal-head"><div class="goal-title">' + t2 
 '</div>';
 };
 
-const dmg = (d.damage || []).find(x => x.pct != null);
-
 let html = '';
 html += goalSection('1 · Gold Standard for Buyers, Sellers & Bike Shops',
 row('damage', dmg ? dmg.pct : null, dmg ? 'week of ' + dmg.week + ' · auto from Weekly View (NYC)' : 'no data in Weekly View') +
-row('warst', latestWeek(w, 'warst_pct'), 'manual weekly entry — Q3 Tracker tab') +
+row('warst', wst ? wst.pct : null, wst ? 'week of ' + wst.week + ' · auto from Weekly View (NYC, col CJ)' : 'no data in Weekly View') +
 '<tr><td class="metric">Next-biz-day ship %</td><td class="val">' + (shipPct == null ? '—' : shipPct + '%') + '</td><td class="muted">baseline → target Jul 15</td><td><span class="chip grey">baselining</span></td><td class="muted">' + shipDetail + '</td></tr>' +
 '<tr><td class="metric">Check-in ≤24h / B2Ci ≤48h</td><td class="val">—</td><td class="muted">100%</td><td><span class="chip grey">instrumentation due Jul 31</span></td><td class="muted">US reception data not yet in Metabase</td></tr>',
 1, GID.ship);
 
 html += goalSection('2 · Operate at Maximum Efficiency',
-row('offline', d.offline.days, d.offline.count + ' bikes offline · ' + d.offline.uploads_per_day + ' uploads/day (28d avg)') +
-row('repairs', avgRepairs, mechs.reduce((a, r) => a + r.repairs, 0) + ' repairs by ' + mechs.length + ' mechanics MTD · avg each, vs 75/full month · <a href="' + SHEET + GID.repairs + '" target="_blank">by mechanic ↗</a>') +
+row('offline', off.days, offDetail) +
+(rp
+? pctRow('Repairs / mechanic (run-rate)', rp.pct_of_goal, rp.mtd_total + ' repairs by ' + rp.headcount + ' mechs MTD (day ' + rp.days_elapsed + '/' + rp.days_in_month + ') · ' + rp.per_mech_mtd + '/mech so far, projects to ' + rp.projected_per_mech + ' by month end vs ' + rp.goal_per_mech + ' goal · <a href="' + SHEET + GID.repairs + '" target="_blank">by mechanic ↗</a>')
+: row('repairs', null, 'pacing data unavailable')) +
 row('parts', parts.per_bike, parts.expenses ? '$' + parts.expenses + ' expenses ÷ ' + parts.bikes_sold + ' sold' : 'enter weekly expenses in US Weekly View → Q3 Tracker') +
 '<tr><td class="metric">FDNY weekly battery audit</td><td class="val">' + w.filter(x => x.fdny_audit_done).length + '/13</td><td class="muted">13/13 by EOQ</td><td>' + (w.length && w[w.length - 1].fdny_audit_done ? '<span class="chip green">this week done</span>' : '<span class="chip amber">log this week</span>') + '</td><td></td></tr>',
 2, GID.repairs);
